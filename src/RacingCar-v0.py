@@ -29,27 +29,14 @@ DRIVE_COMMAND_THROTTLE = [0,1,0]
 DRIVE_COMMAND_BRAKE = [0,0,1]
 
 #NEURAL NETWORK
-x = tensorflow.placeholder(tensorflow.int8, shape=[None, 32, 32, 3])
-y = tensorflow.placeholder(tensorflow.float32, shape=[None, 3])
+x = tensorflow.placeholder(tensorflow.float64, shape=[None, 32,32,3])
+y = tensorflow.placeholder(tensorflow.float64, shape=[None, 3])
 numberOfNodesHiddenLayer_1 = 500
 numberOfNodesHiddenLayer_2 = 500
 numberOfNodesHiddenLayer_3 = 500
 
 numberOfOutputs = 3
 batchSize = 1
-
-
-
-def some_random_games_first():
-    for episode in range(initial_games):
-        env.reset()
-        for t in range(goal_steps):
-            env.render()
-            action = generateRandomAction()
-            observation, reward, done, info = env.step(action)
-            print(observation,reward,info)
-            if done:
-                break
 
 def generateRandomAction():
     left = random.uniform(0, -1)
@@ -90,13 +77,14 @@ def initial_population():
         print('New Game')
         # Play a game till the end
         for _ in range(goal_steps):
-            env.render()
+            #env.render()
             action = generateRandomAction()
             #action = env.action_space.sample()
             print(action)
             observation, reward, done, info = env.step(action)
 
-            previous_observation = numpy.array(observation)[51:83,32:64]
+            previous_observation = numpy.array(observation,dtype=float)[51:83,32:64]
+            action = numpy.array(action,dtype=float)[0:3]
             actualScore += reward
             if reward < 0 and actualScore > 10 :
                 negativCounter += 1
@@ -130,49 +118,21 @@ def initial_population():
     return training_data
 
 
-def neural_network_model():
-    #InputLayer
-    network = input_data(shape=[None, 32,32,3], name='input',dtype='float32')
-
-    # HiddenLayers
-    activation = 'tanh'
-    network = fully_connected(network, 3072, activation=activation)
-    network = dropout(network, 0.8)
-    network = fully_connected(network, 100, activation=activation)
-    network = dropout(network, 0.8)
-    network = fully_connected(network, 50, activation=activation)
-    network = dropout(network, 0.8)
-    network = fully_connected(network, 25, activation=activation)
-    network = dropout(network, 0.8)
-    network = fully_connected(network, 12, activation=activation)
-    network = dropout(network, 0.8)
-
-
-
-    #network = dropout(network, 0.8)
-
-
-    # Output Layer
-    network = fully_connected(network, 3, activation='softmax')
-    network = tflearn.regression(network, optimizer='adam',learning_rate=0.1,loss='categorical_crossentropy',name='targets',dtype='float32')
-
-    model = tflearn.DNN(network, tensorboard_dir='log')
-
-    return model
-
 def neural_tensorflow_model(data):
 
     #Define Layers
-    hiddenLayer_1 = {'weights': tensorflow.Variable(tensorflow.random_normal([32, 32, 3, numberOfNodesHiddenLayer_1])),
-                    'biases': tensorflow.Variable(tensorflow.random_normal(numberOfNodesHiddenLayer_1))}
+    hiddenLayer_1 = {'weights': tensorflow.Variable(tensorflow.random_normal([32,32,3, numberOfNodesHiddenLayer_1])),
+                    'biases': tensorflow.Variable(tensorflow.random_normal([numberOfNodesHiddenLayer_1]))}
     hiddenLayer_2 = {'weights': tensorflow.Variable(tensorflow.random_normal([numberOfNodesHiddenLayer_1, numberOfNodesHiddenLayer_2])),
-                     'biases': tensorflow.Variable(tensorflow.random_normal(numberOfNodesHiddenLayer_2))}
+                     'biases': tensorflow.Variable(tensorflow.random_normal([numberOfNodesHiddenLayer_2]))}
     hiddenLayer_3 = {'weights': tensorflow.Variable(tensorflow.random_normal([numberOfNodesHiddenLayer_2, numberOfNodesHiddenLayer_3])),
-                     'biases': tensorflow.Variable(tensorflow.random_normal(numberOfNodesHiddenLayer_3))}
+                     'biases': tensorflow.Variable(tensorflow.random_normal([numberOfNodesHiddenLayer_3]))}
     outputLayer = {'weights': tensorflow.Variable(tensorflow.random_normal([numberOfNodesHiddenLayer_3, numberOfOutputs])),
-                     'biases': tensorflow.Variable(tensorflow.random_normal(numberOfOutputs))}
+                     'biases': tensorflow.Variable(tensorflow.random_normal([numberOfOutputs]))}
 
     #Connect Layers
+    data = tensorflow.cast(data, tensorflow.float32)
+    tensorflow.expand_dims(data,-1)
     layer1 = tensorflow.add(tensorflow.matmul(data,hiddenLayer_1['weights']),hiddenLayer_1['biases'])
     layer1 = tensorflow.nn.relu(layer1)
     layer2 = tensorflow.add(tensorflow.matmul(layer1, hiddenLayer_2['weights']), hiddenLayer_2['biases'])
@@ -184,9 +144,11 @@ def neural_tensorflow_model(data):
     return output
 
 
-def train_neural_tensorflow_network(x):
-    prediction = neural_tensorflow_model(x)
-    cost = tensorflow.reduce_mean(tensorflow.nn.softmax_cross_entropy_with_logits(prediction,y))
+def train_neural_tensorflow_network(x,y):
+    x_float = x[0]
+
+    prediction = neural_tensorflow_model(x_float)
+    cost = tensorflow.reduce_mean(tensorflow.nn.softmax_cross_entropy_with_logits(prediction,tensorflow.cast(y,tensorflow.float32)))
     optimizer = tensorflow.train.AdamOptimizer().minimize(cost)
 
     numberOfEpochs = 5
@@ -198,137 +160,38 @@ def train_neural_tensorflow_network(x):
         for epoch in numberOfEpochs:
             epochLoss = 0
             for _ in range(int(numberOfExamples/batchSize)):
-                x,y = 1,1 # training data
-                _,c = sess.run([optimizer,cost], feed_dict={x: x, y: y})
+                epoch_x,epoch_y = 1,1 # training data
+                _,c = sess.run([optimizer,cost], feed_dict={x: epoch_x, y: epoch_y})
                 epochLoss += c
             print('Epoch', epoch, 'completed out of', numberOfEpochs, 'loss:', epochLoss)
 
         correct = tensorflow.equal(tensorflow.argmax(prediction,1), tensorflow.argmax(y,1))
         accuracy = tensorflow.reduce_mean(tensorflow.cast(correct,'float'))
-        print('Accuracy:',accuracy.eval({x:training_x,y:training_y}))
-
-
-
-
-
-
-
-
+        print('Accuracy:',accuracy.eval({x:x,y:y}))
 
 def transform_to_array(data):
     X = []
-    for row in data:
+    for i in range(0,len(data)-1):
+        row = data[i]
         x_entry = []
-        for entry in row[0]:
+        for entry in row:
             for color in entry:
-                x_entry.append(color[0])
-                x_entry.append(color[1])
-                x_entry.append(color[2])
+                x_entry.append(float(color[0]))
+                x_entry.append(float(color[1]))
+                x_entry.append(float(color[2]))
         X.append(x_entry)
 
-    return X
+    return X[0]#uint8 needs to be casted to float etc. TypeError: Value passed to parameter 'a' has DataType uint8 not in list of allowed values: float16, float32, float64, int32, complex64, complex128
 
-def transform_to_array_1(data):
-    X = []
-    for row in data:
-        for column in row:
-            for entry in column:
-                for color in entry:
-                    X.append(color)
+def transform_to_float_array(data):
+    for i in range(0,32):
+        for j in range(0,32):
+            for k in range(0,3):
+                data[i][j][k] = float(data[i][j][k])
 
 
-    return X
-
-def train_model(training_data, model=False):
-    #X = transform_to_array(training_data)
-    X = np.array([i[0] for i in training_data ])
-    y = [transformActionToTarget(i[1]) for i in training_data]
-
-    if not model:
-        model = neural_network_model()
-
-
-    model.fit({'input': X}, {'targets': y}, n_epoch=3, snapshot_step=500, show_metric=True,
-              run_id='openaistuff')
-    return model
-
-
-
-#some_random_games_first()
-
-
-#####################################
-###START
-##########
-
-
-
+    return data
 
 initial_training_data = initial_population()
-model = train_model(initial_training_data)
+train_neural_tensorflow_network(initial_training_data[0],initial_training_data[1])
 
-scores = []
-choices = []
-
-with tensorflow.Session() as sess:
-    actualMaxScore = 0
-    maxScore = 0
-    for each_game in range(numberOfGames):
-        score = 0
-        negativCounter = 0
-        game_memory = []
-        training_data = []
-        prev_observations = []
-        env.reset()
-
-        print('New Game')
-        for _ in range(goal_steps):
-            env.render()
-            #if (each_game%5)==0:
-                #env.render()
-            if len(prev_observations) == 0:
-                action = generateRandomAction()
-            else:
-                #prev_observations = transform_to_array_1(prev_observations)
-                #prev_observations = np.reshape(prev_observations,(1,3072))
-                action = model.predict(prev_observations)[0]
-                print(action)
-            choices.append(action)
-
-            new_observation, reward, done, info = env.step(transformPredictionToAction(action))
-            new_observation = numpy.array(new_observation)[51:83,32:64]
-            prev_observations = np.array([i for i in new_observation]).reshape(1,32,32,3)
-            game_memory.append([new_observation, action])
-            score += reward
-            if reward < 0:
-                negativCounter += 1
-            else:
-                negativCounter = 0
-
-
-            print('Score: ', score, 'actualMaxScore:', actualMaxScore, ' maxScore:', maxScore)
-
-            # If car is improving save how it drove
-            if score > actualMaxScore:
-                actualMaxScore = score
-
-
-            if done or negativCounter > 50*NEGATIVE_REWARDS_THRESHOLD:
-                break
-
-        # If the gamescore was high enough save how you played
-        #if abs(actualMaxScore - maxScore) < 3 or maxScore == 0:
-        maxScore = actualMaxScore
-        for data in game_memory:
-            training_data.append([np.array(data[0]), np.array(data[1])])
-        #Retrain model with new data
-        #model = train_model(training_data,model)
-
-        scores.append(score)
-
-    #Show Performance of Model
-    print('Average accepted score: ', mean(scores))
-    #print('Choice 1: {}, Choice 2: {}'.format(choices.count(1) / len(choices),
-    #                                      choices.count(0) / len(choices)))
-
-    model.save('NN_1.model')
